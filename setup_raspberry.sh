@@ -185,12 +185,32 @@ if ! command -v ngrok &> /dev/null; then
     sudo mv /tmp/ngrok /usr/local/bin/
     rm /tmp/ngrok.tgz
     print_success "ngrok instalado"
-    
-    print_warning "Configura tu token de ngrok con:"
-    echo "ngrok config add-authtoken TU_TOKEN"
-    echo "Obtén tu token en: https://dashboard.ngrok.com/get-started/your-authtoken"
 else
     print_success "ngrok ya está instalado"
+fi
+
+# Configurar token de ngrok desde secrets.yaml
+print_warning "Configurando token de ngrok desde secrets.yaml..."
+NGROK_TOKEN=$(python3 -c "
+import yaml
+try:
+    with open('config/secrets.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+        print(config.get('ngrok', {}).get('auth_token', ''))
+except:
+    print('')
+" 2>/dev/null)
+
+if [ ! -z "$NGROK_TOKEN" ]; then
+    ngrok config add-authtoken "$NGROK_TOKEN"
+    print_success "Token de ngrok configurado desde secrets.yaml"
+else
+    print_warning "Token de ngrok no encontrado en secrets.yaml"
+    print_warning "Edita config/secrets.yaml y agrega:"
+    echo "ngrok:"
+    echo "  auth_token: \"TU_TOKEN_AQUI\""
+    echo ""
+    echo "O configúralo manualmente con: ngrok config add-authtoken TU_TOKEN"
 fi
 
 # Paso 10: Configurar servicios systemd
@@ -304,9 +324,9 @@ echo ""
 echo "1. Edita tus credenciales:"
 echo -e "   ${BLUE}nano ~/nvr_ia_raspberry_pi/config/secrets.yaml${NC}"
 echo ""
-echo "2. Configura tu token de ngrok:"
-echo -e "   ${BLUE}ngrok config add-authtoken TU_TOKEN${NC}"
-echo "   Obtén el token en: https://dashboard.ngrok.com/get-started/your-authtoken"
+echo "2. Verifica que el token de ngrok esté configurado:"
+echo -e "   ${BLUE}ngrok config check${NC}"
+echo "   Si no está configurado, edita config/secrets.yaml y agrega tu token en la sección ngrok"
 echo ""
 echo "3. Inicia los servicios:"
 echo -e "   ${BLUE}sudo systemctl start ngrok.service${NC}"
