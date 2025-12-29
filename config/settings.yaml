@@ -1,0 +1,55 @@
+# Configuración principal para NVR + Raspberry Pi
+network:
+  # Subredes a escanear como respaldo (opcional). Ej: ["192.168.1.0/24"]
+  scan_subnets: []
+  discovery_interval_sec: 20
+  ws_discovery_enabled: true
+
+camera:
+  # Las credenciales se leen desde config/secrets.yaml
+  # Rutas RTSP probadas en orden. Se reemplazarán {user}, {pass}, {ip}
+  rtsp_paths:
+    - "rtsp://{user}:{pass}@{ip}:554/Streaming/Channels/101"
+    - "rtsp://{user}:{pass}@{ip}:554/h264"
+    - "rtsp://{user}:{pass}@{ip}:554"
+
+recognition:
+  face_dir: "data/faces/known"
+  face_unknown_dir: "data/faces/unknown"
+  vehicle_dir: "data/vehicles/known"
+  vehicle_unknown_dir: "data/vehicles/unknown"
+  pet_dir: "data/pets/known"
+  pet_unknown_dir: "data/pets/unknown"
+  min_face_size: 60
+  min_confidence: 0.5
+  # Personas/mascotas/vehículos desconocidos generarán eventos con alarma
+  emit_unknown_face_events: true
+
+actions:
+  type: "tuya"
+  tuya:
+    default_on_seconds: 10
+    devices:
+      light:
+        device_id: "REEMPLAZA"
+        ip: "192.168.1.50"
+        local_key: "REEMPLAZA"
+        dps: 1
+        version: 3.3
+      alarm:
+        device_id: "REEMPLAZA"
+        ip: "192.168.1.51"
+        local_key: "REEMPLAZA"
+        dps: 1
+        version: 3.3
+  # WhatsApp: Las credenciales se configuran en config/secrets.yaml
+
+object_detection:
+  enabled: true
+  # Ruta al modelo MobileNet-SSD (Caffe). Puedes descargar con scripts.
+  prototxt: "models/MobileNetSSD_deploy.prototxt"
+  model: "models/MobileNetSSD_deploy.caffemodel"
+  confidence_threshold: 0.5
+
+logging:
+  level: "INFO"  # DEBUG | INFO | WARNING | ERROR
