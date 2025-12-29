@@ -3,6 +3,7 @@ import logging
 import os
 import threading
 from typing import Dict
+from pathlib import Path
 from datetime import datetime
 import cv2
 
@@ -18,6 +19,8 @@ from src.vision.vehicle_recognition import VehicleRecognizer
 from src.vision.pet_recognition import PetRecognizer
 from src.actions.tuya import TuyaActionEngine
 from src.actions.whatsapp_bot import WhatsAppBot
+from src.core.capture_session import is_active, append_image, touch
+from src.vision.image_quality import is_good
 
 
 def setup_logging(level: str) -> None:
@@ -40,6 +43,18 @@ def save_unknown(frame, bbox: tuple, camera_ip: str, category: str) -> str:
     
     filepath = os.path.join(unknown_dir, filename)
     cv2.imwrite(filepath, crop)
+
+    # Dynamic capture: if a session is active for this category+camera,
+    # append this frame into known dataset and refresh session activity.
+    try:
+        if is_active(category, camera_ip):
+            # Solo anexar si la imagen cumple criterios de calidad
+            if is_good(crop, category):
+                append_image(category, camera_ip, Path(filepath))
+                touch(category, camera_ip)
+    except Exception:
+        pass
+
     return filepath
 
 

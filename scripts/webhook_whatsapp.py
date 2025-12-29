@@ -9,16 +9,30 @@ from pathlib import Path
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import yaml
+import time
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.actions.whatsapp_bot import WhatsAppBot
+from src.vision.image_quality import is_good
+from src.core.capture_session import start_session
 
 app = Flask(__name__)
 
 # Estado conversacional (en producción usar Redis/DB)
 # Estructura: {phone_number: {step, category, filename, camera_ip, data}}
 conversation_state = {}
+
+def _parse_camera_ip_from_filename(name: str) -> str:
+    # name format: YYYYMMDD_HHMMSS_192_168_1_100.jpg
+    parts = name.split("_")
+    if len(parts) >= 6:
+        ip_parts = parts[-4:]
+        last = ip_parts[-1]
+        if "." in last:
+            ip_parts[-1] = last.split(".")[0]
+        return ".".join(ip_parts)
+    return "unknown"
 
 # Cargar WhatsApp bot para enviar respuestas
 with open('config/secrets.yaml', 'r', encoding='utf-8') as f:
@@ -72,6 +86,18 @@ def move_recent_captures(category: str, base_name: str, time_window_seconds: int
     
     # Obtener todas las imágenes unknown ordenadas por fecha (más recientes primero)
     unknowns = sorted(unknown_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+    # Filtrar por IP de cámara derivada del base_name para evitar mezclar cámaras
+    # base_name ejemplo: juan_masculino_192_168_1_100.png
+    parts = base_name.split("_")
+    ip_token = None
+    if len(parts) >= 4:
+        ip_parts = parts[-4:]
+        # El último trae extensión .png
+        ip_parts[-1] = ip_parts[-1].split(".")[0]
+        ip_token = "_".join(ip_parts)
+    if ip_token:
+        unknowns = [p for p in unknowns if p.name.endswith(f"{ip_token}.jpg")]
     
     if not unknowns:
         return 0
@@ -108,6 +134,13 @@ def move_recent_captures(category: str, base_name: str, time_window_seconds: int
         dest_file = known_dir / new_name
         
         try:
+            # Cargar y filtrar por calidad
+            import cv2
+            image = cv2.imread(str(img))
+            if image is None or not is_good(image, category):
+                # descartar sin mover si no cumple calidad
+                img.unlink()
+                continue
             shutil.copy2(img, dest_file)
             img.unlink()
             moved_count += 1
@@ -232,6 +265,15 @@ def whatsapp_webhook():
         
         # Mover múltiples capturas de los últimos 30 segundos (máximo 10 imágenes)
         moved_count = move_recent_captures("faces", base_filename, time_window_seconds=30, max_images=10)
+
+        # Iniciar sesión de captura dinámica mientras la cámara siga viendo al objeto
+        # Derivar camera_ip desde la última captura unknown si no está en estado
+        if camera_ip == "unknown":
+            base_dir = Path(__file__).parent.parent / "data" / "faces" / "unknown"
+            unknowns = sorted(base_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if unknowns:
+                camera_ip = _parse_camera_ip_from_filename(unknowns[0].name)
+        start_session("faces", camera_ip, base_filename, ttl_sec=10, max_images=50)
         
         if moved_count > 0:
             whatsapp_bot.send_confirmation("person", {
@@ -291,6 +333,15 @@ def whatsapp_webhook():
         
         # Guardar vehículo con múltiples capturas recientes
         moved_count = move_recent_captures("vehicles", new_filename, time_window_seconds=30, max_images=10)
+
+        # Iniciar sesión de captura dinámica
+        camera_ip = state.get("camera_ip", "unknown")
+        if camera_ip == "unknown":
+            base_dir = Path(__file__).parent.parent / "data" / "vehicles" / "unknown"
+            unknowns = sorted(base_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if unknowns:
+                camera_ip = _parse_camera_ip_from_filename(unknowns[0].name)
+        start_session("vehicles", camera_ip, new_filename, ttl_sec=10, max_images=50)
         
         if moved_count > 0:
             whatsapp_bot.send_confirmation("vehicle", {
@@ -344,6 +395,15 @@ def whatsapp_webhook():
                 new_filename = f"{state['name'].lower().replace(' ', '_')}_{state['pet_type'].lower()}_{camera_ip.replace('.', '_')}.png"
                 
                 moved_count = move_recent_captures("pets", new_filename, time_window_seconds=30, max_images=10)
+
+                # Iniciar sesión de captura dinámica
+                cam_ip = state.get("camera_ip", "unknown")
+                if cam_ip == "unknown":
+                    base_dir = Path(__file__).parent.parent / "data" / "pets" / "unknown"
+                    unknowns = sorted(base_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
+                    if unknowns:
+                        cam_ip = _parse_camera_ip_from_filename(unknowns[0].name)
+                start_session("pets", cam_ip, new_filename, ttl_sec=10, max_images=50)
                 
                 if moved_count > 0:
                     whatsapp_bot.send_confirmation("pet", {
@@ -368,6 +428,15 @@ def whatsapp_webhook():
         new_filename = f"{state['name'].lower().replace(' ', '_')}_{state['pet_type'].lower()}_{camera_ip.replace('.', '_')}.png"
         
         moved_count = move_recent_captures("pets", new_filename, time_window_seconds=30, max_images=10)
+
+        # Iniciar sesión de captura dinámica
+        cam_ip = state.get("camera_ip", "unknown")
+        if cam_ip == "unknown":
+            base_dir = Path(__file__).parent.parent / "data" / "pets" / "unknown"
+            unknowns = sorted(base_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if unknowns:
+                cam_ip = _parse_camera_ip_from_filename(unknowns[0].name)
+        start_session("pets", cam_ip, new_filename, ttl_sec=10, max_images=50)
         
         if moved_count > 0:
             whatsapp_bot.send_confirmation("pet", {
