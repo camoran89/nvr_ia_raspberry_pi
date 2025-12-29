@@ -51,6 +51,73 @@ def move_and_rename(category: str, old_filename: str, new_filename: str) -> bool
     return True
 
 
+def move_recent_captures(category: str, base_name: str, time_window_seconds: int = 30, max_images: int = 10) -> int:
+    """
+    Mueve múltiples capturas recientes de unknown a known para entrenar mejor.
+    
+    Args:
+        category: 'faces', 'vehicles' o 'pets'
+        base_name: nombre base para los archivos (ej: 'juan_masculino_192_168_1_100')
+        time_window_seconds: ventana de tiempo en segundos para considerar capturas recientes
+        max_images: máximo de imágenes a mover
+    
+    Returns:
+        Número de imágenes movidas
+    """
+    base_dir = Path(__file__).parent.parent / "data" / category
+    unknown_dir = base_dir / "unknown"
+    
+    if not unknown_dir.exists():
+        return 0
+    
+    # Obtener todas las imágenes unknown ordenadas por fecha (más recientes primero)
+    unknowns = sorted(unknown_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
+    
+    if not unknowns:
+        return 0
+    
+    # Obtener timestamp de la imagen más reciente
+    latest_time = unknowns[0].stat().st_mtime
+    
+    # Filtrar imágenes dentro de la ventana temporal
+    recent_images = []
+    for img in unknowns:
+        if (latest_time - img.stat().st_mtime) <= time_window_seconds:
+            recent_images.append(img)
+        else:
+            break  # Ya que están ordenadas, no hay más recientes
+        
+        if len(recent_images) >= max_images:
+            break
+    
+    # Crear carpeta en known
+    name_prefix = base_name.split('_')[0]
+    known_dir = base_dir / "known" / name_prefix
+    known_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Mover todas las imágenes recientes con nombres secuenciales
+    moved_count = 0
+    for idx, img in enumerate(recent_images, start=1):
+        # Agregar índice al nombre para evitar colisiones
+        name_parts = base_name.rsplit('.', 1)
+        if len(name_parts) == 2:
+            new_name = f"{name_parts[0]}_{idx:03d}.{name_parts[1]}"
+        else:
+            new_name = f"{base_name}_{idx:03d}.png"
+        
+        dest_file = known_dir / new_name
+        
+        try:
+            shutil.copy2(img, dest_file)
+            img.unlink()
+            moved_count += 1
+        except Exception as e:
+            print(f"Error moviendo {img}: {e}")
+            continue
+    
+    return moved_count
+
+
 def trigger_alarm():
     """Activa la alarma inmediatamente para desconocidos."""
     # Importar TuyaActionEngine y disparar alarma
@@ -159,22 +226,21 @@ def whatsapp_webhook():
             msg.body("❓ Opción inválida. Responde *1* (Hombre) o *2* (Mujer).")
             return str(resp)
         
-        # Guardar persona
+        # Guardar persona con múltiples capturas recientes
         camera_ip = state.get("camera_ip", "unknown")
-        new_filename = f"{state['name'].lower().replace(' ', '_')}_{state['gender'].lower()}_{camera_ip.replace('.', '_')}.png"
+        base_filename = f"{state['name'].lower().replace(' ', '_')}_{state['gender'].lower()}_{camera_ip.replace('.', '_')}.png"
         
-        # Obtener archivo original más reciente
-        base_dir = Path(__file__).parent.parent / "data" / "faces" / "unknown"
-        unknowns = sorted(base_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if unknowns:
-            success = move_and_rename("faces", unknowns[0].name, new_filename)
-            if success:
-                whatsapp_bot.send_confirmation("person", {
-                    "name": state['name'],
-                    "gender": state['gender']
-                })
-            else:
-                msg.body("❌ Error al guardar. Archivo no encontrado.")
+        # Mover múltiples capturas de los últimos 30 segundos (máximo 10 imágenes)
+        moved_count = move_recent_captures("faces", base_filename, time_window_seconds=30, max_images=10)
+        
+        if moved_count > 0:
+            whatsapp_bot.send_confirmation("person", {
+                "name": state['name'],
+                "gender": state['gender']
+            })
+            whatsapp_bot.send_text(f"✅ Se guardaron {moved_count} imágenes para entrenamiento.")
+        else:
+            msg.body("❌ Error al guardar. No se encontraron imágenes recientes.")
         
         conversation_state.pop(from_number, None)
         return str(resp)
@@ -223,19 +289,18 @@ def whatsapp_webhook():
             state["owner"] = incoming_msg
             new_filename = f"{incoming_msg.lower().replace(' ', '_')}_{state['vehicle_type'].lower()}_{state.get('camera_ip', 'unknown').replace('.', '_')}.png"
         
-        # Guardar vehículo
-        base_dir = Path(__file__).parent.parent / "data" / "vehicles" / "unknown"
-        unknowns = sorted(base_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if unknowns:
-            success = move_and_rename("vehicles", unknowns[0].name, new_filename)
-            if success:
-                whatsapp_bot.send_confirmation("vehicle", {
-                    "vehicle_type": state['vehicle_type'],
-                    "plate": state.get('plate'),
-                    "owner": state.get('owner')
-                })
-            else:
-                msg.body("❌ Error al guardar. Archivo no encontrado.")
+        # Guardar vehículo con múltiples capturas recientes
+        moved_count = move_recent_captures("vehicles", new_filename, time_window_seconds=30, max_images=10)
+        
+        if moved_count > 0:
+            whatsapp_bot.send_confirmation("vehicle", {
+                "vehicle_type": state['vehicle_type'],
+                "plate": state.get('plate'),
+                "owner": state.get('owner')
+            })
+            whatsapp_bot.send_text(f"✅ Se guardaron {moved_count} imágenes para entrenamiento.")
+        else:
+            msg.body("❌ Error al guardar. No se encontraron imágenes recientes.")
         
         conversation_state.pop(from_number, None)
         return str(resp)
@@ -274,21 +339,20 @@ def whatsapp_webhook():
             else:
                 state["pet_type"] = pet_types[incoming_msg]
                 
-                # Guardar mascota
+                # Guardar mascota con múltiples capturas recientes
                 camera_ip = state.get("camera_ip", "unknown")
                 new_filename = f"{state['name'].lower().replace(' ', '_')}_{state['pet_type'].lower()}_{camera_ip.replace('.', '_')}.png"
                 
-                base_dir = Path(__file__).parent.parent / "data" / "pets" / "unknown"
-                unknowns = sorted(base_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
-                if unknowns:
-                    success = move_and_rename("pets", unknowns[0].name, new_filename)
-                    if success:
-                        whatsapp_bot.send_confirmation("pet", {
-                            "name": state['name'],
-                            "pet_type": state['pet_type']
-                        })
-                    else:
-                        msg.body("❌ Error al guardar. Archivo no encontrado.")
+                moved_count = move_recent_captures("pets", new_filename, time_window_seconds=30, max_images=10)
+                
+                if moved_count > 0:
+                    whatsapp_bot.send_confirmation("pet", {
+                        "name": state['name'],
+                        "pet_type": state['pet_type']
+                    })
+                    whatsapp_bot.send_text(f"✅ Se guardaron {moved_count} imágenes para entrenamiento.")
+                else:
+                    msg.body("❌ Error al guardar. No se encontraron imágenes recientes.")
                 
                 conversation_state.pop(from_number, None)
                 return str(resp)
@@ -299,21 +363,20 @@ def whatsapp_webhook():
     elif state.get("step") == "ask_pet_other_type":
         state["pet_type"] = incoming_msg
         
-        # Guardar mascota
+        # Guardar mascota con múltiples capturas recientes
         camera_ip = state.get("camera_ip", "unknown")
         new_filename = f"{state['name'].lower().replace(' ', '_')}_{state['pet_type'].lower()}_{camera_ip.replace('.', '_')}.png"
         
-        base_dir = Path(__file__).parent.parent / "data" / "pets" / "unknown"
-        unknowns = sorted(base_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if unknowns:
-            success = move_and_rename("pets", unknowns[0].name, new_filename)
-            if success:
-                whatsapp_bot.send_confirmation("pet", {
-                    "name": state['name'],
-                    "pet_type": state['pet_type']
-                })
-            else:
-                msg.body("❌ Error al guardar. Archivo no encontrado.")
+        moved_count = move_recent_captures("pets", new_filename, time_window_seconds=30, max_images=10)
+        
+        if moved_count > 0:
+            whatsapp_bot.send_confirmation("pet", {
+                "name": state['name'],
+                "pet_type": state['pet_type']
+            })
+            whatsapp_bot.send_text(f"✅ Se guardaron {moved_count} imágenes para entrenamiento.")
+        else:
+            msg.body("❌ Error al guardar. No se encontraron imágenes recientes.")
         
         conversation_state.pop(from_number, None)
         return str(resp)
