@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import yaml
+from pathlib import Path
 
 # Umbrales por defecto (ajustables según necesidad)
 DEFAULTS = {
@@ -9,6 +11,25 @@ DEFAULTS = {
     "min_contrast": 20,     # desviación estándar de grises
     "min_size": 48,         # tamaño mínimo del recorte
 }
+
+
+def _load_overrides() -> dict:
+    """Carga umbrales desde config/settings.yaml si existen."""
+    try:
+        cfg_path = Path("config/settings.yaml")
+        if not cfg_path.exists():
+            return {}
+        with cfg_path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        quality = data.get("quality", {})
+        # Permite override por categoría específica si se desea (face/vehicle/pet)
+        return quality if isinstance(quality, dict) else {}
+    except Exception:
+        return {}
+
+
+# Aplicar overrides en import
+DEFAULTS.update(_load_overrides())
 
 
 def evaluate(image: np.ndarray, category: str, **kwargs) -> dict:

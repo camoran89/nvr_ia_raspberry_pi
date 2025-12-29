@@ -53,3 +53,11 @@ object_detection:
 
 logging:
   level: "INFO"  # DEBUG | INFO | WARNING | ERROR
+
+# Calidad de imagen: umbrales para filtrar imágenes malas antes de entrenar
+quality:
+  min_brightness: 40   # muy oscuro por debajo
+  max_brightness: 230  # sobreexpuesto por encima
+  min_contrast: 20     # bajo contraste por debajo
+  min_sharpness: 120   # borrosa por debajo
+  min_size: 48         # recorte mínimo aceptable (pixeles)

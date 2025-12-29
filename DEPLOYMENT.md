@@ -99,6 +99,25 @@ El sistema reentrenará automáticamente con las nuevas imágenes al iniciar.
 
 ---
 
+## Calidad de Imagen y Umbrales (Opcional)
+
+El sistema filtra imágenes malas antes de entrenar (muy oscuras, borrosas o con bajo contraste). Puedes ajustar los umbrales en [config/settings.yaml](config/settings.yaml):
+
+```yaml
+quality:
+   min_brightness: 40   # muy oscuro por debajo
+   max_brightness: 230  # sobreexpuesto por encima
+   min_contrast: 20     # bajo contraste por debajo
+   min_sharpness: 120   # borrosa por debajo
+   min_size: 48         # tamaño mínimo del recorte
+```
+
+Notas:
+- Los umbrales aplican a todas las categorías (persona, vehículo y mascota).
+- Si quieres ser más permisivo en exteriores (vehículos), baja `min_sharpness` y/o `min_contrast`.
+- Para mejorar rostros, aumenta `min_sharpness` a ~150-200.
+- Las imágenes descartadas siguen guardándose en `unknown/` para auditoría, pero no se mueven a `known/`.
+
 ## Comandos Útiles
 
 ### Reiniciar servicios
